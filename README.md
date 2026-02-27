@@ -40,7 +40,12 @@ Open http://localhost:7860.
 
 ## License
 
-Use and modify as you like.
+This project is based on an open source template by **Ed Donner**, used under the MIT License. See [LICENSE](LICENSE).
+
+## Acknowledgments
+
+- **Ed Donner** — original open source Python/Gradio template this project is derived from.
+    - From his [Udemy Course](https://www.udemy.com/share/10dasB3@TFIe-eRJlSqN_Vawcosw8wlgQb4GGiioG87isOC58SBDzaVmyrKuHXsXFBVZezyVXQ==/)
 
 ---
 
@@ -48,5 +53,4 @@ Use and modify as you like.
 
 - **Do not commit** `infra/terraform.tfvars` (it contains secrets). It is in `.gitignore`.
 - **Do not commit** `infra/terraform.tfstate` or `infra/terraform.tfstate.backup` (local state). They are in `.gitignore`.
-- If you want to keep context PDFs private, uncomment `base_context/*.pdf` in `.gitignore`.
 - Run `git status` and review before pushing; ensure no `.env` or API keys are staged.
