@@ -31,18 +31,25 @@ def load_pushover_credentials_from_ssm():
     os.environ["PUSHOVER_TOKEN"] = token_val
     os.environ["PUSHOVER_USER"] = user_val
 
-# load_dotenv(override=True)
+
+# Load .env for local dev (optional; on AWS, keys come from SSM)
+load_dotenv()
 
 
 def push(text):
-    requests.post(
-        "https://api.pushover.net/1/messages.json",
-        data={
-            "token": os.getenv("PUSHOVER_TOKEN"),
-            "user": os.getenv("PUSHOVER_USER"),
-            "message": text,
-        }
-    )
+    """Send a Pushover notification; no-op if credentials are not configured."""
+    token = os.getenv("PUSHOVER_TOKEN")
+    user = os.getenv("PUSHOVER_USER")
+    if not token or not user:
+        return
+    try:
+        requests.post(
+            "https://api.pushover.net/1/messages.json",
+            data={"token": token, "user": user, "message": text},
+            timeout=10,
+        )
+    except requests.RequestException:
+        pass  # Don't fail the app if Pushover is unreachable
 
 
 def record_user_details(email, name="Name not provided", notes="not provided"):
@@ -69,92 +76,64 @@ def record_book_call(name, company, email):
 
 record_user_details_json = {
     "name": "record_user_details",
-    "description": "Use this tool to record that a user is interested in being in touch and provided an email address",
+    "description": "Use when a recruiter or visitor wants to get in touch: they shared an email (and optionally name/notes). Record their contact info so Nathan can follow up.",
     "parameters": {
         "type": "object",
         "properties": {
-            "email": {
-                "type": "string",
-                "description": "The email address of this user"
-            },
-            "name": {
-                "type": "string",
-                "description": "The user's name, if they provided it"
-            }
-            ,
-            "notes": {
-                "type": "string",
-                "description": "Any additional information about the conversation that's worth recording to give context"
-            }
+            "email": {"type": "string", "description": "The contact's email address"},
+            "name": {"type": "string", "description": "The contact's name, if provided"},
+            "notes": {"type": "string", "description": "Context worth recording (e.g. role, company, opportunity)"},
         },
         "required": ["email"],
-        "additionalProperties": False
-    }
+        "additionalProperties": False,
+    },
 }
 
 record_unknown_question_json = {
     "name": "record_unknown_question",
-    "description": "Always use this tool to record any question that couldn't be answered as you didn't know the answer",
+    "description": "Use when you cannot answer a question (missing or unclear context). Record the question so Nathan can improve the context or follow up.",
     "parameters": {
         "type": "object",
         "properties": {
-            "question": {
-                "type": "string",
-                "description": "The question that couldn't be answered"
-            },
+            "question": {"type": "string", "description": "The question that could not be answered"},
         },
         "required": ["question"],
-        "additionalProperties": False
-    }
+        "additionalProperties": False,
+    },
 }
 
 record_book_call_json = {
     "name": "record_book_call",
-    "description": "Always use this tool to record that a user wants to book a call with you",
+    "description": "Use when a recruiter or contact explicitly wants to book a call with Nathan. Record name, company, and email.",
     "parameters": {
         "type": "object",
         "properties": {
-            "name": {
-                "type": "string",
-                "description": "The user's name"
-            },
-            "company": {
-                "type": "string",
-                "description": "The user's company"
-            },
-            "email": {
-                "type": "string",
-                "description": "The user's email"
-            },
+            "name": {"type": "string", "description": "The contact's name"},
+            "company": {"type": "string", "description": "The contact's company"},
+            "email": {"type": "string", "description": "The contact's email"},
         },
         "required": ["name", "company", "email"],
-        "additionalProperties": False
-    }
+        "additionalProperties": False,
+    },
 }
 
 record_feedback_json = {
     "name": "record_feedback",
-    "description": "Use this tool to record any feedback, comments, complaints, praise, or suggestions that users provide about the chat experience, responses, or website. Always use this when a user expresses satisfaction, dissatisfaction, suggestions, or any form of feedback.",
+    "description": "Use when the user gives feedback about the chat, the site, or the experience (praise, complaints, suggestions). Record it for Nathan.",
     "parameters": {
         "type": "object",
         "properties": {
-            "feedback_text": {
-                "type": "string",
-                "description": "The feedback text provided by the user"
-            },
+            "feedback_text": {"type": "string", "description": "The feedback text"},
             "feedback_type": {
                 "type": "string",
-                "description": "The type of feedback: 'positive', 'negative', 'suggestion', 'question', or 'general'",
-                "enum": ["positive", "negative", "suggestion", "question", "general"]
+                "description": "Type of feedback",
+                "enum": ["positive", "negative", "suggestion", "question", "general"],
             },
-            "context": {
-                "type": "string",
-                "description": "Optional context about what the feedback relates to (e.g., which response, topic, or feature)"
-            }
+            "context": {"type": "string", "description": "Optional context (e.g. which response or topic)"},
         },
         "required": ["feedback_text"],
-        "additionalProperties": False
-    }
+        "additionalProperties": False,
+    },
 }
 
 tools = [{"type": "function", "function": record_user_details_json},
@@ -174,11 +153,9 @@ class Me:
         # Where Terraform/user_data syncs your S3 context files
         context_dir = Path(os.environ.get("CONTEXT_LOCAL_DIR", "me")).resolve()
 
-        # Load base context docs
-        self.linkedin = self._load_pdfs(context_dir, prefer_names=[
-            "Profile.pdf",
-            "Resume_NathanSchellink_2026.pdf",
-        ])
+        # Load base context docs (all PDFs up to limit, alphabetically)
+        max_pdfs = int(os.environ.get("PDF_CONTEXT_MAX_FILES", "50"))
+        self.linkedin = self._load_pdfs(context_dir, max_files=max_pdfs)
 
         self.summary = self._load_txt(context_dir, prefer_names=[
             "summary.txt",
@@ -187,14 +164,10 @@ class Me:
         # OpenAI client (key handled separately; see note below)
         self.openai = OpenAI()
 
-    def _load_pdfs(self, context_dir: Path, prefer_names=None) -> str:
-        prefer_names = prefer_names or []
+    def _load_pdfs(self, context_dir: Path, max_files: int = 50) -> str:
+        """Load text from all PDFs in context_dir (and subdirs), up to max_files, sorted by path."""
         text_chunks = []
-
-        # Read preferred PDFs first (if present), then any other PDFs
-        preferred_paths = [context_dir / name for name in prefer_names]
-        other_paths = sorted(p for p in context_dir.rglob("*.pdf") if p not in preferred_paths)
-        pdf_paths = [p for p in preferred_paths if p.exists()] + other_paths
+        pdf_paths = sorted(context_dir.rglob("*.pdf"))[:max_files]
 
         for pdf_path in pdf_paths:
             try:
@@ -204,7 +177,6 @@ class Me:
                     if t.strip():
                         text_chunks.append(t)
             except Exception as e:
-                # Don't crash app if one PDF is malformed
                 text_chunks.append(f"\n[WARN] Failed reading {pdf_path.name}: {e}\n")
 
         return "\n\n".join(text_chunks)
@@ -238,43 +210,50 @@ class Me:
         return results
     
     def system_prompt(self):
-        system_prompt = f"You are acting as {self.name}. You are answering questions on {self.name}'s website, \
-        particularly questions related to {self.name}'s career, background, skills and experience. \
-        Your responsibility is to represent {self.name} for interactions on the website as faithfully as possible. \
-        You are given a summary of {self.name}'s background, resume, and LinkedIn profile which you can use to answer questions. \
-        Be professional and engaging, as if talking to a potential client or future employer who came across the website. \
-        If you don't know the answer to any question, use your record_unknown_question tool to record the question that you couldn't answer, even if it's about something trivial or unrelated to career. \
-        If the user is engaging in discussion, try to steer them towards getting in touch via email; ask for their email and record it using your record_user_details tool. Alternatively, you can direct them to book a call with me: https://calendar.app.google/S8u5pxaknnFtAmxZ6 \
-        If a user provides any feedback, comments, suggestions, complaints, or expresses satisfaction or dissatisfaction with the chat experience or your responses, always use your record_feedback tool to record it. This includes positive feedback, negative feedback, suggestions for improvement, or any comments about the website or chat functionality."
-
-        system_prompt += f"\n\n## Summary:\n{self.summary}\n\n## LinkedIn Profile:\n{self.linkedin}\n\n"
-        system_prompt += f"With this context, please chat with the user, always staying in character as {self.name}. "
-        system_prompt += f"IMPORTANT: The summary contains job filtering preferences marked 'Do not share with user' - use these preferences internally to filter and evaluate job opportunities, but NEVER directly quote or share these specific preferences (salary requirements, location preferences, work type preferences, etc.) with users. Instead, politely decline opportunities that don't match these criteria without revealing the specific requirements."
-        return system_prompt
+        return (
+            f"You are a representative of {self.name}, acting as the first point of contact for recruiters and others who visit his site. "
+            "Your goals are to: (1) answer questions about his background, experience, and skills using the context below; "
+            "(2) filter and qualify interest—especially from recruiters—so only relevant opportunities reach him; "
+            "(3) get interested, qualified contacts in touch by capturing their email (record_user_details) or booking a call (record_book_call). "
+            "Be professional and concise. Represent him faithfully. "
+            "When you don't know an answer, use record_unknown_question so he can improve the context. "
+            "When someone gives feedback on the chat or site, use record_feedback. "
+            "When a recruiter or visitor wants to connect, encourage them to share their email or book a call (e.g. https://calendar.app.google/S8u5pxaknnFtAmxZ6) and use the appropriate tool. "
+            "The summary may include job-filtering preferences marked 'Do not share with user'. Use these only to evaluate fit internally; never quote or reveal them. "
+            "Politely decline opportunities that don't match those criteria without stating the exact requirements."
+            f"\n\n## Summary\n{self.summary}\n\n## Resume / profile / documents\n{self.linkedin}\n\n"
+            "Stay in character as Nathan's representative. Be helpful and direct recruiters toward next steps when there's a fit."
+        )
 
     def get_welcome_message(self):
-        return f"Hello! I'm {self.name}. Hi, I represent Nathan Schellink! It's great to meet you! I'm here to answer any questions you might have about my background, experience, skills, or career. Feel free to ask me anything, and if you'd like to get in touch, I'd be happy to connect!\n\nHow can I help you today?"
+        return (
+            f"Hi! I represent **{self.name}**. I'm here to answer questions about his background, experience, and career—and to help connect you with him if there's a fit.\n\n"
+            "Ask me anything about his skills, roles, or preferences. If you're a recruiter with a relevant opportunity and would like to get in touch, I can capture your details or point you to his calendar to book a call.\n\n"
+            "How can I help you today?"
+        )
     
     def chat(self, message, history):
-        # Build messages list
         messages = [{"role": "system", "content": self.system_prompt()}]
         messages.extend(history)
         messages.append({"role": "user", "content": message})
-        
-        # Process the conversation
-        done = False
-        while not done:
-            response = self.openai.chat.completions.create(model="gpt-4o-mini", messages=messages, tools=tools)
-            if response.choices[0].finish_reason=="tool_calls":
-                message = response.choices[0].message
-                tool_calls = message.tool_calls
-                results = self.handle_tool_call(tool_calls)
-                messages.append(message)
-                messages.extend(results)
-            else:
-                done = True
-        
-        return response.choices[0].message.content
+
+        try:
+            done = False
+            while not done:
+                response = self.openai.chat.completions.create(
+                    model="gpt-4o-mini", messages=messages, tools=tools
+                )
+                if response.choices[0].finish_reason == "tool_calls":
+                    msg = response.choices[0].message
+                    results = self.handle_tool_call(msg.tool_calls)
+                    messages.append(msg)
+                    messages.extend(results)
+                else:
+                    done = True
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            print(f"OpenAI API error: {e}", flush=True)
+            return "Sorry, something went wrong on my side. Please try again or get in touch directly if you'd like to connect."
     
 
 if __name__ == "__main__":
@@ -287,7 +266,10 @@ if __name__ == "__main__":
     )
     with gr.Blocks(title=f"Chat with {me.name}") as demo:
         gr.Markdown(f"## Chat with {me.name}")
-        gr.Markdown("Welcome! I'm here to answer questions about my background, experience, and career. Feel free to ask me anything!")
+        gr.Markdown(
+            "**For recruiters:** Learn about Nathan's background and see if there's a fit. "
+            "Interested in connecting? Share your details and I'll make sure he gets in touch."
+        )
         gr.ChatInterface(me.chat, chatbot=chatbot, type="messages")
     # Bind to all interfaces for container/EC2; port from env or default 7860
     demo.launch(
