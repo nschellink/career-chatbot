@@ -127,6 +127,9 @@ ipython_config.py
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
 
+# macOS
+.DS_Store
+
 # Celery stuff
 celerybeat-schedule
 celerybeat.pid
@@ -191,8 +194,22 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Backup / editor
+*~
+*.bak
+requirements-lock.txt~*
+
 # PyPI configuration file
 .pypirc
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/*.tfvars
+infra/*.auto.tfvars
+!infra/*.tfvars.example
 
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
@@ -205,3 +222,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Keep context out of the repo (context is synced from S3 on deploy)
+base_context/*

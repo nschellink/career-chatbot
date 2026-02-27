@@ -1,0 +1,32 @@
+# Copy to terraform.tfvars and fill in. Never commit terraform.tfvars (secrets).
+# See README and variables.tf for descriptions.
+
+region   = "us-west-1"
+app_name = "career-chatbot"
+
+# App source: set one of these.
+# git_repo_url = "https://github.com/YOUR_USER/career-chatbot.git"
+git_branch   = "main"
+# app_s3_uri   = "s3://YOUR_CONTEXT_BUCKET/deploy/app.tar.gz"   # optional: deploy from local via deploy-from-local.sh
+
+# Required: OpenAI API key (stored in SSM SecureString by Terraform).
+openai_api_key = "sk-..."
+
+# Optional: Pushover for notifications. Leave empty to disable.
+# pushover_token = ""
+# pushover_user  = ""
+
+# Optional: custom domain (CloudFront + HTTPS). Leave app_domain empty to use instance IP only.
+# app_domain       = "chat.example.com"
+# hosted_zone_id   = "Z0..."
+# manage_app_dns_record = true
+# acm_certificate_arn   = "arn:aws:acm:us-east-1:ACCOUNT:certificate/..."
+
+# Optional: restrict who can reach the app.
+# allow_http_cidr = "0.0.0.0/0"
+
+# Optional: SSH (e.g. for EC2 Instance Connect). Your IP/32.
+# ssh_cidr = "1.2.3.4/32"
+
+# Optional: attach an existing Elastic IP.
+# eip_allocation_id = "eipalloc-..."
